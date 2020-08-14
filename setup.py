@@ -16,26 +16,14 @@ ROOT = Path(__file__).parent
 SRC = ROOT / "src"
 
 
-GPU_SUPPORT = 0 == int(
-    subprocess.call(
-        "nvidia-smi",
-        shell=True,
-        stdout=open(os.devnull, "w"),
-        stderr=open(os.devnull, "w"),
-    )
-)
-
 try:
-    from sphinx import apidoc, setup_command
-
-    HAS_SPHINX = True
-except ImportError:
-
+    import sphinx.setup_command
+    import sphinx.ext.apidoc
+except ImportError as err:
     logging.warning(
-        "Package 'sphinx' not found. You will not be able to build the docs."
+        f"Package '{err.name}' not found. You will not be able to build the docs."
     )
-
-    HAS_SPHINX = False
+    sphinx = None
 
 
 def read(*names, encoding="utf8"):
@@ -232,9 +220,9 @@ setup_kwargs: dict = dict(
     },
 )
 
-if HAS_SPHINX:
+if sphinx is not None:
 
-    class BuildApiDoc(setup_command.BuildDoc):
+    class BuildApiDoc(sphinx.setup_command.BuildDoc):
         def run(self):
             args = list(
                 itertools.chain(
@@ -246,7 +234,7 @@ if HAS_SPHINX:
                     ["setup*", "test", "docs", "*pycache*"],  # excluded paths
                 )
             )
-            apidoc.main(args)
+            sphinx.ext.apidoc.main(args)
             super(BuildApiDoc, self).run()
 
     for command in ["build_sphinx", "doc", "docs"]:
