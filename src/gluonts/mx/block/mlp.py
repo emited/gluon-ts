@@ -15,11 +15,14 @@
 from typing import List
 
 # Third-party imports
+import mxnet as mx
 from mxnet.gluon import nn
 
 # First-party imports
 from gluonts.core.component import validated
 from gluonts.model.common import Tensor
+from gluonts.mx.block.batch_norm import BatchNorm
+from gluonts.mx.activation import get_activation
 
 
 class MLP(nn.HybridBlock):
@@ -40,7 +43,7 @@ class MLP(nn.HybridBlock):
 
     @validated()
     def __init__(
-        self, layer_sizes: List[int], flatten: bool, activation="relu"
+        self, layer_sizes: List[int], flatten: bool, activation="relu", **kwargs
     ) -> None:
         super().__init__()
         self.layer_sizes = layer_sizes
@@ -48,7 +51,7 @@ class MLP(nn.HybridBlock):
             self.layers = nn.HybridSequential()
             for layer, layer_dim in enumerate(layer_sizes):
                 self.layers.add(
-                    nn.Dense(layer_dim, flatten=flatten, activation=activation)
+                    nn.Dense(layer_dim, flatten=flatten, activation=activation, **kwargs)
                 )
 
     # noinspection PyMethodOverriding
@@ -68,3 +71,57 @@ class MLP(nn.HybridBlock):
             Output of the MLP given the input tensor.
         """
         return self.layers(x)
+
+class BNMLP(nn.HybridBlock):
+    @validated()
+    def __init__(self, in_units, hidden_units, out_units,
+                 num_layers=1, activation='relu', batch_norm=True, flatten=True,
+                 weight_initializer=mx.init.Xavier(magnitude=0.02),
+                 bias_initializer='zeros',
+                 ):
+        super().__init__()
+        self.in_units = in_units
+        self.hidden_units = hidden_units
+        self.out_units = out_units
+        self.num_layers = num_layers
+        self.activation = activation
+        self.batch_norm = batch_norm
+        self.weight_initializer = weight_initializer
+        self.bias_initializer = bias_initializer
+        self.flatten = flatten
+
+        in_units = self.in_units
+        with self.name_scope():
+            self.mlp = nn.HybridSequential()
+            for i in range(self.num_layers):
+                lin = nn.Dense(self.hidden_units,
+                               in_units=in_units,
+                               activation=None,
+                               weight_initializer=self.weight_initializer,
+                               bias_initializer=self.bias_initializer,
+                               flatten=self.flatten,
+                               )
+                act = get_activation(self.activation)()
+                self.mlp.add(lin, act)
+                if self.batch_norm:
+                    print('TO DO: Make Batch Norm work in inference mode !!')
+                    bn = BatchNorm()
+                    self.mlp.add(bn)
+                in_units = self.hidden_units
+            last_lin = nn.Dense(self.out_units,
+                                in_units=in_units,
+                                activation=None,
+                                weight_initializer=self.weight_initializer,
+                                bias_initializer=self.bias_initializer,
+                                flatten=self.flatten,
+                                )
+            self.mlp.add(last_lin)
+
+    def _set_batch_norm_axis(self, x):
+        for layer in self.mlp:
+            if isinstance(layer, BatchNorm):
+                layer.set_axis(x.ndim - 1)
+
+    def hybrid_forward(self, F, x):
+        self._set_batch_norm_axis(x)
+        return self.mlp(x)
